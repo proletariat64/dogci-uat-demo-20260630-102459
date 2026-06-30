@@ -3,7 +3,7 @@ from hello import greet
 
 
 def test_greet_default():
-    assert greet() != "Hello, dogci!"
+    assert greet() == "Hello, dogci!"
 
 
 def test_greet_custom():
