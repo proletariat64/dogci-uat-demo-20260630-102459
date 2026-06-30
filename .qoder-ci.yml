@@ -4,10 +4,10 @@ comment_status_is_failure: true
 update_existing_comment: true
 checks:
   - name: format
-    command: ".venv/bin/python -m black --check ."
+    command: "uv run --with black black --check ."
     required: false
   - name: tests
-    command: ".venv/bin/python -m pytest"
+    command: "uv run --with pytest python -m pytest"
     required: true
 context:
   include_repo_docs:
