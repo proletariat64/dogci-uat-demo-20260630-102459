@@ -212,6 +212,8 @@ def resolve_engine(settings: dict[str, Any]) -> str:
     configured_engine = settings.get("engine")
     if isinstance(configured_engine, str) and configured_engine.strip():
         return validate_engine(configured_engine.strip())
+    if configured_engine is not None and not isinstance(configured_engine, str):
+        raise ReviewFailure(f"{AI_REVIEW_SETTINGS_FILE} field engine must be a string")
 
     legacy_engine = (os.getenv("AI_REVIEW_ENGINE") or "").strip()
     if legacy_engine:
@@ -232,6 +234,29 @@ def resolve_claude_provider(settings: dict[str, Any]) -> str:
     return provider
 
 
+def resolve_runtime_config(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    resolved_settings = settings if settings is not None else load_ai_review_settings()
+    enabled = resolve_enabled(resolved_settings)
+    engine = resolve_engine(resolved_settings)
+    config: dict[str, Any] = {
+        "enabled": enabled,
+        "engine": engine,
+    }
+    if not enabled:
+        return config
+    if engine == "claude-deepseek":
+        config["claude_provider"] = resolve_claude_provider(resolved_settings)
+    elif engine == "qoder":
+        config["qoder_models"] = resolve_qoder_model_sequence(resolved_settings)
+    return config
+
+
+def print_resolved_config() -> int:
+    config = resolve_runtime_config()
+    print(json.dumps(config, sort_keys=True))
+    return 0
+
+
 def provider_timeout_seconds() -> int:
     raw = os.getenv("AI_REVIEW_TIMEOUT_SECONDS") or os.getenv("QODER_REVIEW_TIMEOUT_SECONDS")
     if not raw:
@@ -241,21 +266,6 @@ def provider_timeout_seconds() -> int:
     except ValueError:
         return PROVIDER_TIMEOUT_SECONDS
     return parsed if parsed > 0 else PROVIDER_TIMEOUT_SECONDS
-
-
-def qoder_timeout_seconds() -> int:
-    try:
-        settings = load_qoder_settings()
-    except Exception:
-        settings = {}
-    raw = os.getenv("QODER_REVIEW_TIMEOUT_SECONDS") or settings.get("timeout_seconds")
-    if raw is None:
-        return provider_timeout_seconds()
-    try:
-        parsed = int(raw)
-    except (TypeError, ValueError):
-        return provider_timeout_seconds()
-    return parsed if parsed > 0 else provider_timeout_seconds()
 
 
 def gh_json(args: list[str], engine: str) -> Any:
@@ -364,7 +374,10 @@ def disabled_comment(engine: str) -> str:
 {COMMENT_MARKER}
 
 ### Verdict
-SKIP
+PASS
+
+### AI review state
+DISABLED
 
 ### What changed
 - AI review is disabled by `.github/ai-review/settings.json`.
@@ -382,8 +395,8 @@ SKIP
 - Not evaluated because AI review is disabled by configuration.
 
 ### File-skip check
-- Skip used: yes.
-- Reason: AI review disabled by configuration.
+- Skip used: no.
+- Reason: provider review was disabled by configuration, not skipped by file policy.
 
 ### Dogsquard boundary check
 - Deterministic `PR Quality Gate` remains the merge authority.
@@ -481,6 +494,8 @@ def qoder_settings_timeout(settings: dict[str, Any]) -> int:
     raw = settings.get("timeout_seconds")
     if raw is None:
         return provider_timeout_seconds()
+    if isinstance(raw, bool):
+        return provider_timeout_seconds()
     try:
         parsed = int(raw)
     except (TypeError, ValueError):
@@ -490,30 +505,6 @@ def qoder_settings_timeout(settings: dict[str, Any]) -> int:
 
 def qodercli_bin() -> str:
     return os.getenv("QODERCLI_BIN") or "qodercli"
-
-
-def parse_qoder_model_list(text: str) -> list[str]:
-    models: list[str] = []
-    for line in text.splitlines():
-        value = line.strip()
-        if not value or value.upper() == "MODEL":
-            continue
-        models.append(value)
-    return models
-
-
-def glm_version_key(model: str) -> tuple[int, ...]:
-    match = re.search(r"\bGLM[-_]?(\d+(?:\.\d+)*)", model, flags=re.IGNORECASE)
-    if not match:
-        return (0,)
-    return tuple(int(part) for part in match.group(1).split("."))
-
-
-def latest_glm_model(models: list[str]) -> str | None:
-    glms = [model for model in models if model.upper().startswith("GLM")]
-    if not glms:
-        return None
-    return max(glms, key=lambda model: (glm_version_key(model), model))
 
 
 def configured_qoder_models(settings: dict[str, Any]) -> list[str]:
@@ -598,10 +589,9 @@ def run_qoder(prompt: str, settings: dict[str, Any]) -> tuple[str, str]:
             "--output-format",
             "text",
             "-p",
-            prompt,
         ]
         log(f"Qoder invocation: starting qodercli with model {model}")
-        code, stdout, stderr = run_capture(cmd, timeout_seconds=timeout_seconds)
+        code, stdout, stderr = run_capture(cmd, input_text=prompt, timeout_seconds=timeout_seconds)
         if code == 0:
             try:
                 return validate_review_output(stdout, engine), model
@@ -682,7 +672,18 @@ def validate_review_output(text: str, engine: str) -> str:
     return ensure_status_line(comment, verdict)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["--resolve-config"]:
+        try:
+            return print_resolved_config()
+        except ReviewFailure as exc:
+            log(redact_known_secrets(str(exc)))
+            return 1
+    if args:
+        log(f"Unknown argument(s): {' '.join(args)}")
+        return 2
+
     engine = "unknown"
     try:
         settings = load_ai_review_settings()
