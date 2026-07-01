@@ -6,7 +6,8 @@
   },
   "qoder": {
     "models": [
-      "DeepSeek-V4-Pro"
+      "GLM-5.2",
+      "Qwen3.7-Max"
     ],
     "implicit_auto_fallback": true
   }
