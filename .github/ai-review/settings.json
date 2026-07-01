@@ -6,8 +6,7 @@
   },
   "qoder": {
     "models": [
-      "Kimi-K2.7-Code",
-      "MiniMax-M3"
+      "DeepSeek-V4-Pro"
     ],
     "implicit_auto_fallback": true
   }
