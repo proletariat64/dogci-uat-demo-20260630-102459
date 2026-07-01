@@ -6,8 +6,8 @@
   },
   "qoder": {
     "models": [
-      "GLM-5.2",
-      "Qwen3.7-Max"
+      "Kimi-K2.7-Code",
+      "MiniMax-M3"
     ],
     "implicit_auto_fallback": true
   }
