@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "engine": "qoder",
+  "engine": "claude-deepseek",
   "claude": {
     "provider": "deepseek"
   },
